@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Lyrics Lower Thirds – OBS</title>
+<title>Lyrics Lower Thirds</title>
 
 <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@500;600&display=swap" rel="stylesheet">
 
@@ -15,34 +15,32 @@ html, body {
 }
 
 /* =========================
-   OUTPUT (LOWER THIRD)
+   LOWER THIRD OUTPUT
 ========================= */
 #lower-third {
   position: fixed;
-  bottom: 8%;
+  bottom: 9%;
   width: 100%;
-  text-align: center;
+  display: flex;
+  justify-content: center;
   pointer-events: none;
 }
 
 #current-verse {
-  display: inline-block;
   max-width: 85%;
+  text-align: center;
   font-size: 48px;
   line-height: 1.35;
+  color: #ffffff;
   padding: 18px 36px;
-  color: #fff;
-  white-space: pre-line;
-
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0,0,0,0.55);
   border-radius: 12px;
+  opacity: 0;
+  transition: opacity 200ms ease;
 
   text-shadow:
     2px 2px 6px rgba(0,0,0,0.85),
     0px 0px 12px rgba(0,0,0,0.6);
-
-  opacity: 0;
-  transition: opacity 250ms ease;
 }
 
 #current-verse.show {
@@ -50,93 +48,95 @@ html, body {
 }
 
 /* =========================
-   CONTROL PANEL
+   CONTROLS
 ========================= */
 #controls {
   position: fixed;
   top: 20px;
   left: 20px;
   width: 360px;
-  background: #222;
+  background: #1f1f1f;
   color: #fff;
-  padding: 16px;
-  border-radius: 14px;
+  padding: 14px;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.5);
   font-size: 14px;
 }
 
-button {
-  padding: 6px 14px;
-  margin-right: 6px;
-  margin-bottom: 8px;
-  border-radius: 8px;
+#controls button {
+  background: #eee;
   border: none;
+  padding: 6px 12px;
+  margin-right: 6px;
+  border-radius: 6px;
   cursor: pointer;
 }
 
-button:hover {
-  opacity: 0.85;
-}
-
-.section {
-  margin-top: 12px;
-  font-weight: bold;
-}
-
-.preview {
-  white-space: pre-line;
-  opacity: 0.85;
-  margin-top: 4px;
+#controls h4 {
+  margin: 10px 0 6px;
+  font-weight: 600;
 }
 
 #verse-list {
-  margin-top: 12px;
-  max-height: 220px;
+  max-height: 240px;
   overflow-y: auto;
-  background: #111;
-  border-radius: 8px;
+  margin-top: 10px;
 }
 
-.verse-item {
-  padding: 8px 10px;
+#verse-list div {
+  padding: 6px 8px;
   cursor: pointer;
+  border-radius: 6px;
 }
 
-.verse-item:hover {
-  background: #333;
-}
-
-.active {
+#verse-list div.active {
   background: #444;
+}
+
+/* =========================
+   HIDE CONTROLS FOR OBS
+========================= */
+.hide-controls #controls {
+  display: none;
 }
 </style>
 </head>
 
 <body>
 
-<!-- OUTPUT -->
+<!-- LOWER THIRD -->
 <div id="lower-third">
   <div id="current-verse"></div>
 </div>
 
 <!-- CONTROLS -->
 <div id="controls">
-  <button id="prevBtn">⬅ Prev</button>
-  <button id="nextBtn">Next ➡</button>
-  <button id="toggleBtn">Show / Hide</button>
+  <button onclick="prev()">⬅ Prev</button>
+  <button onclick="next()">Next ➡</button>
+  <button onclick="toggle()">Show / Hide</button>
 
-  <div class="section">Previous:</div>
-  <div id="prevPreview" class="preview"></div>
+  <h4>Previous</h4>
+  <div id="prev-preview"></div>
 
-  <div class="section">Current:</div>
-  <div id="currentPreview" class="preview"></div>
+  <h4>Current</h4>
+  <div id="curr-preview"></div>
 
-  <div class="section">Next:</div>
-  <div id="nextPreview" class="preview"></div>
+  <h4>Next</h4>
+  <div id="next-preview"></div>
 
+  <h4>Jump to verse</h4>
   <div id="verse-list"></div>
 </div>
 
 <script>
+/* =========================
+   CONTROL VISIBILITY
+========================= */
+const params = new URLSearchParams(window.location.search);
+if (!params.has("controls")) {
+  document.body.classList.add("hide-controls");
+}
+
 /* =========================
    STATE
 ========================= */
@@ -144,17 +144,14 @@ let verses = [];
 let index = 0;
 let visible = true;
 
-/* =========================
-   ELEMENTS
-========================= */
-const currentVerseEl = document.getElementById("current-verse");
-const prevPreviewEl = document.getElementById("prevPreview");
-const currentPreviewEl = document.getElementById("currentPreview");
-const nextPreviewEl = document.getElementById("nextPreview");
-const verseListEl = document.getElementById("verse-list");
+const currentEl = document.getElementById("current-verse");
+const prevEl = document.getElementById("prev-preview");
+const currEl = document.getElementById("curr-preview");
+const nextEl = document.getElementById("next-preview");
+const listEl = document.getElementById("verse-list");
 
 /* =========================
-   LOAD LYRICS (TXT)
+   LOAD LYRICS (TXT CMS)
 ========================= */
 fetch("song-lyrics.txt")
   .then(res => res.text())
@@ -162,77 +159,75 @@ fetch("song-lyrics.txt")
     verses = text
       .split("\n\n")
       .map(v => v.trim())
-      .filter(v => v.length);
+      .filter(Boolean);
 
-    buildVerseList();
-    updateDisplay();
-  })
-  .catch(() => {
-    currentVerseEl.textContent = "Lyrics file not found";
-    currentVerseEl.classList.add("show");
+    render();
+    buildList();
   });
 
 /* =========================
-   DISPLAY LOGIC
+   RENDER
 ========================= */
-function updateDisplay() {
-  if (!verses.length) return;
+function render() {
+  if (!verses[index]) return;
 
-  currentVerseEl.innerHTML = verses[index].replace(/\n/g, "<br>");
-  currentVerseEl.classList.toggle("show", visible);
+  currentEl.innerHTML = verses[index].replace(/\n/g, "<br>");
+  currentEl.classList.toggle("show", visible);
 
-  prevPreviewEl.textContent =
-    verses[index - 1] ? verses[index - 1] : "—";
+  prevEl.textContent = verses[index - 1] || "";
+  currEl.textContent = verses[index];
+  nextEl.textContent = verses[index + 1] || "";
 
-  currentPreviewEl.textContent =
-    verses[index];
+  [...listEl.children].forEach((el, i) =>
+    el.classList.toggle("active", i === index)
+  );
+}
 
-  nextPreviewEl.textContent =
-    verses[index + 1] ? verses[index + 1] : "—";
+/* =========================
+   NAVIGATION
+========================= */
+function next() {
+  if (index < verses.length - 1) {
+    index++;
+    render();
+  }
+}
 
-  document.querySelectorAll(".verse-item").forEach((el, i) => {
-    el.classList.toggle("active", i === index);
-  });
+function prev() {
+  if (index > 0) {
+    index--;
+    render();
+  }
+}
+
+function toggle() {
+  visible = !visible;
+  render();
 }
 
 /* =========================
    VERSE LIST
 ========================= */
-function buildVerseList() {
-  verseListEl.innerHTML = "";
+function buildList() {
+  listEl.innerHTML = "";
   verses.forEach((v, i) => {
-    const div = document.createElement("div");
-    div.className = "verse-item";
-    div.textContent = `Verse ${i + 1}: ${v.split("\n")[0]}`;
-    div.onclick = () => {
+    const item = document.createElement("div");
+    item.textContent = `Verse ${i + 1}: ${v.split("\n")[0]}`;
+    item.onclick = () => {
       index = i;
-      updateDisplay();
+      render();
     };
-    verseListEl.appendChild(div);
+    listEl.appendChild(item);
   });
 }
 
 /* =========================
-   CONTROLS
+   KEYBOARD (OPTIONAL)
 ========================= */
-document.getElementById("nextBtn").onclick = () => {
-  if (index < verses.length - 1) {
-    index++;
-    updateDisplay();
-  }
-};
-
-document.getElementById("prevBtn").onclick = () => {
-  if (index > 0) {
-    index--;
-    updateDisplay();
-  }
-};
-
-document.getElementById("toggleBtn").onclick = () => {
-  visible = !visible;
-  updateDisplay();
-};
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") next();
+  if (e.key === "ArrowLeft") prev();
+});
 </script>
 
 </body>
